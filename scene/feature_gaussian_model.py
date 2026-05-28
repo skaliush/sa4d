@@ -86,7 +86,8 @@ class GaussianModel:
             #     torch.nn.Linear(64, feature_dim, bias=True)
             # ).cuda()
             self._mlp = SegNet(args, feature_dim).cuda()
-            self._classifier = torch.nn.Conv2d(feature_dim, 256, kernel_size=1).cuda()
+            self.num_classes = getattr(args, "num_classes", 256)
+            self._classifier = torch.nn.Conv2d(feature_dim, self.num_classes, kernel_size=1).cuda()
             # print("Feature Dimension: ", feature_dim)
 
     def capture(self):

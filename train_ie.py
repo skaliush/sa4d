@@ -11,7 +11,7 @@
 import numpy as np
 import random
 import os, sys
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 # os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 import torch
 from random import randint
@@ -41,7 +41,7 @@ def training(dataset, hyper, opt, pipe, mode="feature", testing_iterations=None,
     gaussians = GaussianModel(dataset.sh_degree, mode, hyper, dataset.feature_dim)
     scene = Scene(dataset, gaussians, mode=mode, cam_view=cam_view)
     gaussians.training_setup(opt)
-    num_classes = 256
+    num_classes = dataset.num_classes
     print("Num classes: ",num_classes)
     cls_criterion = torch.nn.CrossEntropyLoss(reduction='none')
     background = torch.zeros([dataset.feature_dim], dtype=torch.float32, device="cuda")
@@ -115,10 +115,17 @@ def training(dataset, hyper, opt, pipe, mode="feature", testing_iterations=None,
         loss_obj_3d = None
         # if iteration % opt.reg3d_interval == 0:
         # regularize at certain intervals
-        identity_encoding = gaussians._mlp(gaussians.get_xyz, torch.tensor(viewpoint_cam.time).cuda().repeat(gaussians.get_xyz.shape[0], 1))
+        xyz_for_reg = gaussians.get_xyz
+        deformed_for_reg = render_pkg["deformed_points"].detach()
+        if xyz_for_reg.shape[0] > opt.reg3d_max_points:
+            reg_indices = torch.randperm(xyz_for_reg.shape[0], device=xyz_for_reg.device)[:opt.reg3d_max_points]
+            xyz_for_reg = xyz_for_reg[reg_indices]
+            deformed_for_reg = deformed_for_reg[reg_indices]
+
+        identity_encoding = gaussians._mlp(xyz_for_reg, torch.tensor(viewpoint_cam.time).cuda().repeat(xyz_for_reg.shape[0], 1))
         logits3d = gaussians._classifier(identity_encoding.unsqueeze(1).permute(2, 0, 1))
         prob_obj3d = torch.softmax(logits3d,dim=0).squeeze().permute(1,0)
-        loss_obj_3d = loss_cls_3d(render_pkg["deformed_points"].detach(), prob_obj3d, opt.reg3d_k, opt.reg3d_lambda_val, opt.reg3d_max_points, opt.reg3d_sample_size)
+        loss_obj_3d = loss_cls_3d(deformed_for_reg, prob_obj3d, opt.reg3d_k, opt.reg3d_lambda_val, opt.reg3d_max_points, opt.reg3d_sample_size)
         loss = loss_obj + loss_obj_3d
         # else:
         #     loss = loss_obj

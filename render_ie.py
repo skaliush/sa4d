@@ -7,7 +7,7 @@
 # GRAPHDECO research group, https://team.inria.fr/graphdeco
 
 import os, sys
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 import torch
 from scene import Scene
 from tqdm import tqdm
@@ -88,6 +88,11 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     # makedirs(gt_colormask_path, exist_ok=True)
     # makedirs(pred_obj_path, exist_ok=True)
 
+    pred_obj_path = os.path.join(model_path, name, "ours_{}".format(iteration), "objects_pred")
+    gt_obj_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt_objects")
+    makedirs(pred_obj_path, exist_ok=True)
+    makedirs(gt_obj_path, exist_ok=True)
+
     pred_obj_mask_list = []
     # pca_list = []
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
@@ -95,7 +100,11 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         rendering_obj = results["render"]
         logits = gaussians._classifier(rendering_obj)
         pred_obj = torch.argmax(logits,dim=0)
-        pred_obj_mask = visualize_obj(pred_obj.cpu().numpy().astype(np.uint8))
+        pred_obj_np = pred_obj.cpu().numpy().astype(np.uint8)
+        Image.fromarray(pred_obj_np).save(os.path.join(pred_obj_path, '{0:05d}'.format(idx) + ".png"))
+        if getattr(view, "objects", None) is not None:
+            Image.fromarray(view.objects.cpu().numpy().astype(np.uint8)).save(os.path.join(gt_obj_path, '{0:05d}'.format(idx) + ".png"))
+        pred_obj_mask = visualize_obj(pred_obj_np)
         # pca = feature_to_rgb(rendering_obj)
         
         pred_obj_mask_list.append(pred_obj_mask)
@@ -109,7 +118,7 @@ def render_sets(dataset : ModelParams, hyperparam, iteration : int, pipeline : P
         gaussians = GaussianModel(dataset.sh_degree, mode, hyperparam, dataset.feature_dim)
         scene = Scene(dataset, gaussians, load_iteration=iteration, mode=mode, shuffle=False, cam_view=cam_view)
         # cam_type = scene.dataset_type
-        num_classes = 256
+        num_classes = dataset.num_classes
         print("Num classes: ",num_classes)
 
         # bg_color = [1,1,1] if dataset.white_background else [0, 0, 0]

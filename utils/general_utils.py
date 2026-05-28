@@ -140,7 +140,7 @@ def safe_state(silent):
     
     # 确保CUDA可用并正确设置
     assert torch.cuda.is_available(), "CUDA must be available"
-    device = torch.device("cuda")
+    device = torch.device("cuda:0")
     torch.cuda.set_device(device)
     torch.cuda.manual_seed(0)
     

@@ -61,9 +61,11 @@ class ModelParams(ParamGroup):
         
         #! sam_features
         self.feature_dim = 16
+        self.num_classes = 256
         # self.init_from_3dgs_pcd = False
         self._feature_model_path = ""
         self.object_masks = False
+        self.need_features = False
         self.need_masks = False
         self.need_gt_masks = False
         

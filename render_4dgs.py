@@ -9,7 +9,7 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 import os, sys
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 import imageio
 import numpy as np
 import torch

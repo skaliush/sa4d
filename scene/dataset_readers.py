@@ -37,6 +37,8 @@ class CameraInfo(NamedTuple):
     FovY: np.array
     FovX: np.array
     image: np.array
+    sam_features: np.array
+    sam_masks: np.array
     objects: np.array
     gt_mask: np.array
     image_path: str
@@ -54,6 +56,10 @@ class SceneInfo(NamedTuple):
     nerf_normalization: dict
     ply_path: str
     maxtime: int
+
+def resolve_blender_frame_path(path, file_path, extension):
+    frame_path = file_path if Path(file_path).suffix else file_path + extension
+    return os.path.normpath(os.path.join(path, frame_path))
 
 def getNerfppNorm(cam_info):
     def get_center_and_diag(cam_centers):
@@ -117,8 +123,10 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
         image = Image.open(image_path)
         image = PILtoTorch(image,None)
         cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
+                              sam_features=None, sam_masks=None,
                               image_path=image_path, image_name=image_name, width=width, height=height,
-                              time = float(idx/len(cam_extrinsics)), mask=None) # default by monocular settings.
+                              time = float(idx/len(cam_extrinsics)), mask=None,
+                              objects=None, gt_mask=None) # default by monocular settings.
         cam_infos.append(cam_info)
     sys.stdout.write('\n')
     return cam_infos
@@ -128,7 +136,10 @@ def fetchPly(path):
     vertices = plydata['vertex']
     positions = np.vstack([vertices['x'], vertices['y'], vertices['z']]).T
     colors = np.vstack([vertices['red'], vertices['green'], vertices['blue']]).T / 255.0
-    normals = np.vstack([vertices['nx'], vertices['ny'], vertices['nz']]).T
+    if all(name in vertices.data.dtype.names for name in ("nx", "ny", "nz")):
+        normals = np.vstack([vertices['nx'], vertices['ny'], vertices['nz']]).T
+    else:
+        normals = np.zeros_like(positions)
     return BasicPointCloud(points=positions, colors=colors, normals=normals)
 
 def storePly(path, xyz, rgb):
@@ -238,12 +249,11 @@ def generateCamerasFromTransforms(path, template_transformsfile, extension, maxt
     # breakpoint()
     # load a single image to get image info.
     for idx, frame in enumerate(template_json["frames"]):
-        cam_name = os.path.join(path, frame["file_path"] + extension)
-        image_path = os.path.join(path, cam_name)
-        image_name = Path(cam_name).stem
+        image_path = resolve_blender_frame_path(path, frame["file_path"], extension)
+        image_name = Path(image_path).stem
         image = Image.open(image_path)
         im_data = np.array(image.convert("RGBA"))
-        image = PILtoTorch(image,(800,800))
+        image = PILtoTorch(image,None)
         break
     # format information
     for idx, (time, poses) in enumerate(zip(render_times,render_poses)):
@@ -257,10 +267,10 @@ def generateCamerasFromTransforms(path, template_transformsfile, extension, maxt
         FovX = fovx
         cam_infos.append(CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image, sam_features=None, sam_masks=None,
                             image_path=None, image_name=None, width=image.shape[1], height=image.shape[2],
-                            time = time, mask=None))
+                            time = time, mask=None, objects=None, gt_mask=None))
     return cam_infos
 
-def readCamerasFromTransforms(path, transformsfile, white_background, extension=".png", mapper = {}, features_folder=None, masks_folder=None):
+def readCamerasFromTransforms(path, transformsfile, white_background, extension=".png", mapper = {}, features_folder=None, masks_folder=None, object_masks_folder=None):
     cam_infos = []
 
     with open(os.path.join(path, transformsfile)) as json_file:
@@ -271,19 +281,20 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
             fovx = focal2fov(contents['fl_x'],contents['w'])
         frames = contents["frames"]
         for idx, frame in enumerate(frames):
-            cam_name = os.path.join(path, frame["file_path"] + extension)
+            image_path = resolve_blender_frame_path(path, frame["file_path"], extension)
             time = mapper[frame["time"]]
             matrix = np.linalg.inv(np.array(frame["transform_matrix"]))
             R = -np.transpose(matrix[:3,:3])
             R[:,0] = -R[:,0]
             T = -matrix[:3, 3]
 
-            image_path = os.path.join(path, cam_name)
-            image_name = Path(cam_name).stem
+            image_name = Path(image_path).stem
             image = Image.open(image_path)
             
             sam_features = torch.load(os.path.join(features_folder, image_name.split('.')[0] + ".pt"), map_location="cpu") if features_folder is not None else None
             sam_masks = torch.load(os.path.join(masks_folder, image_name.split('.')[0] + ".pt"), map_location="cpu") if masks_folder is not None else None
+            object_mask_path = os.path.join(object_masks_folder, image_name + ".png") if object_masks_folder is not None else None
+            objects = torch.from_numpy(np.array(Image.open(object_mask_path))).long() if object_mask_path is not None and os.path.exists(object_mask_path) else None
             # sam_features = torch.load(os.path.join(features_folder, image_name.split('.')[0] + ".pt")) if features_folder is not None else None
             # sam_masks = torch.load(os.path.join(masks_folder, image_name.split('.')[0] + ".pt")) if masks_folder is not None else None
 
@@ -294,14 +305,14 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
             norm_data = im_data / 255.0
             arr = norm_data[:,:,:3] * norm_data[:, :, 3:4] + bg * (1 - norm_data[:, :, 3:4])
             image = Image.fromarray(np.array(arr*255.0, dtype=np.byte), "RGB")
-            image = PILtoTorch(image,(800,800))
+            image = PILtoTorch(image,None)
             fovy = focal2fov(fov2focal(fovx, image.shape[1]), image.shape[2])
             FovY = fovy 
             FovX = fovx
 
             cam_infos.append(CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image, sam_features=sam_features, sam_masks=sam_masks,
                             image_path=image_path, image_name=image_name, width=image.shape[1], height=image.shape[2],
-                            time = time, mask=None))
+                            time = time, mask=None, objects=objects, gt_mask=None))
             
     return cam_infos
 
@@ -328,9 +339,11 @@ def readNerfSyntheticInfo(path, white_background, eval, extension=".png", need_f
     print("Reading Training Transforms")
     train_cam_infos = readCamerasFromTransforms(path, "transforms_train.json", white_background, extension, timestamp_mapper,
                                                 features_folder=os.path.join(path, "train_features") if need_features else None,
-                                                masks_folder=os.path.join(path, "train_sam_masks") if need_masks else None)
+                                                masks_folder=os.path.join(path, "train_sam_masks") if need_masks else None,
+                                                object_masks_folder=os.path.join(path, "object_mask", "train") if os.path.exists(os.path.join(path, "object_mask", "train")) else None)
     print("Reading Test Transforms")
-    test_cam_infos = readCamerasFromTransforms(path, "transforms_test.json", white_background, extension, timestamp_mapper)
+    test_cam_infos = readCamerasFromTransforms(path, "transforms_test.json", white_background, extension, timestamp_mapper,
+                                               object_masks_folder=os.path.join(path, "object_mask", "test") if os.path.exists(os.path.join(path, "object_mask", "test")) else None)
     print("Generating Video Transforms")
     video_cam_infos = generateCamerasFromTransforms(path, "transforms_train.json", extension, max_time)
     
@@ -381,6 +394,7 @@ def format_infos(dataset,split):
             FovX = focal2fov(dataset.focal[0], image.shape[1])
             FovY = focal2fov(dataset.focal[0], image.shape[2])
             cameras.append(CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
+                                sam_features=None, sam_masks=None,
                                 image_path=image_path, image_name=image_name, width=image.shape[2], height=image.shape[1],
                                 time = time, mask=None, objects=None, gt_mask=None))
 
@@ -435,6 +449,7 @@ def format_render_poses(poses,data_infos):
         FovX = focal2fov(data_infos.focal[0], image.shape[2])
         FovY = focal2fov(data_infos.focal[0], image.shape[1])
         cameras.append(CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
+                            sam_features=None, sam_masks=None,
                             image_path=image_path, image_name=image_name, width=image.shape[2], height=image.shape[1],
                             time = time, mask=None, objects=None, gt_mask=None))
     return cameras

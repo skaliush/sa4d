@@ -1,12 +1,45 @@
-# 为了确保完整性，也可以直接忽略整个目录
+# Datasets and generated experiment outputs
 /data/
 /output/
+/logs/
 
-# 忽略大文件
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Native/CUDA build artifacts
+build/
+dist/
+*.egg-info/
+*.so
+*.o
+*.a
+.ninja_deps
+.ninja_log
+
+# Generated submodule extension builds
+submodules/**/build/
+submodules/**/*_C*.so
+submodules/**/_C*.so
+
+# Local dependency clones/downloads created during setup
+Tracking-Anything-with-DEVA/Grounded-Segment-Anything/
+
+# Heavy model/data artifacts
 *.mp4
 *.ply
-
-# 忽略可能的数据文件
+*.pth
+*.pt
+*.ckpt
+*.safetensors
 *.npy
-*.json
-*.pth 
+*.npz
+
+# Generated metric dumps/results
+results.json
+per_view.json
+metrics_*.json
+metrics_*.txt
